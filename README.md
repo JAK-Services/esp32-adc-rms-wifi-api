@@ -138,3 +138,11 @@ This repository accompanies a detailed tutorial explaining:
 
 📖 **Full tutorial:**  
 https://jak-services.github.io/en/tutorial_esp32_adc_wifi_api.html
+
+---
+
+## License
+
+This project is released into the public domain under The Unlicense.
+
+
