@@ -18,6 +18,7 @@
 
 static const char *gTag = "MAIN";
 
+
 static void AdcScheduler_Task(void *pvArg)
 {
     // Runs periodic ADC measurements at a coarse interval
@@ -38,6 +39,7 @@ static void AdcScheduler_Task(void *pvArg)
         vTaskDelay(pdMS_TO_TICKS(iMeasurePeriodSeconds * 1000));
     }
 }
+
 
 void app_main(void)
 {
