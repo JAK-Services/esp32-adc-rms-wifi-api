@@ -315,23 +315,28 @@ static esp_err_t Api_HandleStatus(httpd_req_t *psReq)
 
 static esp_err_t Api_HandleStaIp(httpd_req_t *psReq)
 {
-    // Serves STA IPv4 address as JSON when connected
-    // Allows provisioning UI and users to see assigned IP
-    // Returns hasValue=false if no valid STA address is available
+    // Serves the current STA IPv4 address (if any) as JSON.
+    // Backwards compatible with v1 provisioning page which expects {"sta_ip":"x"}.
+    // Also keeps v2 fields {"hasValue":true,"ip":"x"} for newer clients.
 
-    // Get STA IP string if valid
+    // Read cached IP from Wi-Fi manager
     char sIp[32] = {0};
     bool bHas = WifiMgr_GetStaIp(sIp, sizeof(sIp));
 
-    // Format JSON response
+    // Build JSON payload
     char sJson[128];
-    if (!bHas) {
-        snprintf(sJson, sizeof(sJson), "{\"hasValue\":false}");
+    if (bHas) {
+        (void)snprintf(sJson, sizeof(sJson),
+                       "{\"hasValue\":true,\"ip\":\"%s\",\"sta_ip\":\"%s\"}",
+                       sIp, sIp);
     } else {
-        snprintf(sJson, sizeof(sJson), "{\"hasValue\":true,\"ip\":\"%s\"}", sIp);
+        (void)snprintf(sJson, sizeof(sJson),
+                       "{\"hasValue\":false,\"ip\":\"\",\"sta_ip\":\"\"}");
     }
 
+    // Send JSON response (no-cache so browsers see updates)
     httpd_resp_set_type(psReq, "application/json");
+    httpd_resp_set_hdr(psReq, "Cache-Control", "no-store");
     httpd_resp_send(psReq, sJson, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
@@ -340,31 +345,56 @@ static esp_err_t Api_HandleStaIp(httpd_req_t *psReq)
 
 static esp_err_t Api_HandleIps(httpd_req_t *psReq)
 {
-    // Serves combined addressing info including STA IP and SoftAP default IP
-    // Keeps the legacy endpoint behavior intact for existing pages
-    // Returns fields even when not connected to help debugging
+    // Serves the provisioning IP status page on the AP interface.
+    // Polls the cached STA DHCP IP and turns it into a clickable link.
+    // Keeps refresh on this page to avoid resubmitting provisioning forms.
 
-    // Get STA IP string if valid
-    char sStaIp[32] = {0};
-    bool bHasSta = WifiMgr_GetStaIp(sStaIp, sizeof(sStaIp));
+    // Build HTML response
+    const char *sHtml =
+        "<!doctype html><html><head>"
+        "<meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>Device IP</title>"
+        "<style>"
+        "body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;"
+        "background:#0b0f14;color:#e9eef6;display:flex;min-height:100vh;align-items:center;"
+        "justify-content:center;padding:24px}"
+        ".card{width:min(520px,100%);background:#121a24;border:1px solid #1f2b3a;"
+        "border-radius:18px;box-shadow:0 12px 30px rgba(0,0,0,.35);padding:22px}"
+        "h1{font-size:clamp(20px,4.5vw,28px);margin:0 0 10px}"
+        ".muted{color:#a9b4c2;font-size:clamp(13px,3.4vw,14px);line-height:1.35}"
+        "a{color:#7dd3fc;text-decoration:none}a:hover{text-decoration:underline}"
+        ".pill{display:inline-block;padding:6px 10px;border-radius:999px;"
+        "border:1px solid #2a3a50;background:#0f1620;font-size:13px}"
+        "small{display:block;margin-top:14px;color:#9fb0c6;line-height:1.35}"
+        "</style></head><body><div class='card'>"
+        "<h1>WiFi saved</h1>"
+        "<div class='muted'>Select your <b>home router WiFi</b> for the link below to work.</div>"
+        "<div style='height:14px'></div>"
+        "<div class='muted'>Device IP on your router: <span class='pill'><a id='ipLink' href='#'>detecting...</a></span></div>"
+        "<small>If your phone disconnects from this AP during setup, reconnect and refresh this page.</small>"
+        "<script>"
+        "async function poll(){"
+        " try{"
+        "  const r=await fetch('/api/sta_ip?t='+Date.now(),{cache:'no-store'});"
+        "  if(!r.ok) return;"
+        "  const j=await r.json();"
+        "  const a=document.getElementById('ipLink');"
+        "  if(j.sta_ip){a.textContent=j.sta_ip; a.href='http://'+j.sta_ip+'/';}"
+        "  else{a.textContent='detecting...'; a.href='#';}"
+        " }catch(e){}"
+        "}"
+        "poll();"
+        "setInterval(poll,5000);"
+        "</script>"
+        "</div></body></html>";
 
-    // Format JSON response
-    char sJson[256];
-    snprintf(sJson, sizeof(sJson),
-             "{"
-             "\"hasSta\":%s,"
-             "\"staIp\":\"%s\","
-             "\"apIp\":\"%s\""
-             "}",
-             bHasSta ? "true" : "false",
-             bHasSta ? sStaIp : "",
-             PROV_AP_IP_ADDR);
-
-    httpd_resp_set_type(psReq, "application/json");
-    httpd_resp_send(psReq, sJson, HTTPD_RESP_USE_STRLEN);
+    // Send HTML response
+    httpd_resp_set_type(psReq, "text/html; charset=utf-8");
+    httpd_resp_set_hdr(psReq, "Cache-Control", "no-store");
+    httpd_resp_send(psReq, sHtml, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
-
 
 
 static esp_err_t Api_HandleRms(httpd_req_t *psReq)
