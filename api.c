@@ -18,6 +18,7 @@
 static const char *gTag = "API";
 static httpd_handle_t gsHttpServer = NULL;
 
+
 static esp_err_t Api_HandleRoot(httpd_req_t *psReq)
 {
     // Serves a simple dashboard HTML page
@@ -73,6 +74,7 @@ static esp_err_t Api_HandleRoot(httpd_req_t *psReq)
     return ESP_OK;
 }
 
+
 static esp_err_t Api_HandleStatus(httpd_req_t *psReq)
 {
     // Serves device status JSON including Wi-Fi manager state
@@ -114,6 +116,7 @@ static esp_err_t Api_HandleStaIp(httpd_req_t *psReq)
     httpd_resp_send(psReq, sJson, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
+
 
 static esp_err_t Api_HandleIps(httpd_req_t *psReq)
 {
@@ -189,6 +192,7 @@ static esp_err_t Api_HandleRms(httpd_req_t *psReq)
     return ESP_OK;
 }
 
+
 static esp_err_t Api_HandleCmd(httpd_req_t *psReq)
 {
     // Accepts simple commands for future extension
@@ -216,6 +220,7 @@ static esp_err_t Api_HandleCmd(httpd_req_t *psReq)
     httpd_resp_send(psReq, sJson, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
+
 
 esp_err_t Api_Start(void)
 {
@@ -253,14 +258,14 @@ esp_err_t Api_Start(void)
     };
     ESP_ERROR_CHECK(httpd_register_uri_handler(gsHttpServer, &sStaIpUri));
 
-// Register /api/ips
-httpd_uri_t sIpsUri = {
-    .uri = "/api/ips",
-    .method = HTTP_GET,
-    .handler = Api_HandleIps,
-    .user_ctx = NULL
-};
-ESP_ERROR_CHECK(httpd_register_uri_handler(gsHttpServer, &sIpsUri));
+	// Register /api/ips
+	httpd_uri_t sIpsUri = {
+		.uri = "/api/ips",
+		.method = HTTP_GET,
+		.handler = Api_HandleIps,
+		.user_ctx = NULL
+	};
+	ESP_ERROR_CHECK(httpd_register_uri_handler(gsHttpServer, &sIpsUri));
 
     // Register dashboard page
     httpd_uri_t sRootUri = {
@@ -292,6 +297,7 @@ ESP_ERROR_CHECK(httpd_register_uri_handler(gsHttpServer, &sIpsUri));
     ESP_LOGI(gTag, "API started on port %d", iHttpServerPort);
     return ESP_OK;
 }
+
 
 httpd_handle_t Api_GetHttpServer(void)
 {
