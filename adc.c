@@ -1,7 +1,6 @@
-
 // Implements ADC sampling and signal processing for two input channels.
 // Provides RMS measurement with filtering, DC removal, and attenuation selection.
-// Maintains latest measurement state with thread-safe access for other modules.
+// Caches last waveform window in volts (mV) for plotting without re-sampling.
 
 #include "adc.h"
 
@@ -29,12 +28,22 @@ static adc_result_t gsLatestResult;
 static bool gbHasLatest = false;
 
 
-// ======================== Helpers from adc_log.c (refactored) ========================
+// ======================== Last captured waveform cache (AC, mV) ========================
+static int16_t gaiLastAcMilliVoltsChA[iSamples_PerCh];
+static int16_t gaiLastAcMilliVoltsChB[iSamples_PerCh];
+static int giLastSamplesCount = 0;
+static int64_t gliLastSamplesTimestampUs = 0;
+static adc_atten_t geLastSamplesAttenChA = ADC_ATTEN_DB_12;
+static adc_atten_t geLastSamplesAttenChB = ADC_ATTEN_DB_12;
+static bool gbHasLastSamples = false;
+
+
+
 static void Dc_Remove(const uint16_t *puInput, int32_t *piOutput, int iCount)
 {
     // Removes DC component from samples by subtracting the mean value
-    // Produces signed, zero-centered samples for RMS computation
-    // Keeps units in ADC counts to avoid hidden scaling until conversion
+    // Produces signed, zero-centered samples for waveform display and RMS compute
+    // Keeps units in ADC counts so conversion can be applied later
 
     // Compute mean value
     int64_t liSum = 0;
@@ -50,6 +59,7 @@ static void Dc_Remove(const uint16_t *puInput, int32_t *piOutput, int iCount)
 }
 
 
+
 static void Moving_Average_Filter(const uint16_t *puInput, uint16_t *puOutput, int iCount)
 {
     // Applies moving average filter to reduce high frequency noise
@@ -61,16 +71,22 @@ static void Moving_Average_Filter(const uint16_t *puInput, uint16_t *puOutput, i
 
     // Filter each sample with a clamped moving window
     for (int iIndex = 0; iIndex < iCount; iIndex++) {
+
         uint32_t uiAccumulator = 0;
+
+        // Accumulate taps around current index
         for (int iTap = -iTapHalf; iTap <= iTapHalf; iTap++) {
             int iSource = iIndex + iTap;
             if (iSource < 0) iSource = 0;
             if (iSource >= iCount) iSource = iCount - 1;
             uiAccumulator += puInput[iSource];
         }
+
+        // Store averaged output sample
         puOutput[iIndex] = (uint16_t)(uiAccumulator / (uint32_t)iFilterTapCount);
     }
 }
+
 
 
 static float Adc_CountsToVolts(adc_atten_t eAttenChannel, int32_t iCounts)
@@ -95,6 +111,7 @@ static float Adc_CountsToVolts(adc_atten_t eAttenChannel, int32_t iCounts)
 }
 
 
+
 static float Compute_RmsVolts(const int32_t *piAcCounts, int iCount, adc_atten_t eAtten)
 {
     // Computes RMS value from zero-centered ADC counts
@@ -113,6 +130,7 @@ static float Compute_RmsVolts(const int32_t *piAcCounts, int iCount, adc_atten_t
     float fRms = (float)sqrt(dMeanSq);
     return fRms;
 }
+
 
 
 static bool Capture_PairedSamples(uint16_t *puChA, uint16_t *puChB, int iCount)
@@ -166,6 +184,7 @@ static bool Capture_PairedSamples(uint16_t *puChA, uint16_t *puChB, int iCount)
 }
 
 
+
 static adc_atten_t Step_AttenuationMoreSensitive(adc_atten_t eCurrent)
 {
     // Steps attenuation one level toward more sensitivity
@@ -188,6 +207,7 @@ static adc_atten_t Step_AttenuationMoreSensitive(adc_atten_t eCurrent)
 
     return eCurrent;
 }
+
 
 
 static void AutoRange_Attenuations(adc_atten_t *peAttenChA, adc_atten_t *peAttenChB)
@@ -264,51 +284,52 @@ static void AutoRange_Attenuations(adc_atten_t *peAttenChA, adc_atten_t *peAtten
         }
     }
 
-    *peAttenChA = eAttenA;
-    *peAttenChB = eAttenB;
+    // Return chosen values
+    if (peAttenChA != NULL) *peAttenChA = eAttenA;
+    if (peAttenChB != NULL) *peAttenChB = eAttenB;
 }
+
 
 
 esp_err_t Adc_Init(void)
 {
-    // Initializes ADC unit and synchronization primitives
-    // Configures ADC1 one-shot driver for two channels
-    // Prepares module for periodic measurements and cached reads
+    // Initializes the ADC unit and channel configuration
+    // Creates the mutex used to guard cached measurement results
+    // Prepares the module for periodic or on-demand measurements
 
-    // Create mutex for safe cached access
+    // Create ADC mutex for shared state
     if (gsAdcMutex == NULL) {
         gsAdcMutex = xSemaphoreCreateMutex();
-        if (gsAdcMutex == NULL) {
-            return ESP_ERR_NO_MEM;
-        }
+    }
+    if (gsAdcMutex == NULL) {
+        return ESP_ERR_NO_MEM;
     }
 
-    // Create ADC1 unit
-    adc_oneshot_unit_init_cfg_t sUnitCfg = {
-        .unit_id = ADC_UNIT_1,
-        .ulp_mode = ADC_ULP_MODE_DISABLE,
+    // Create ADC oneshot unit
+    adc_oneshot_unit_init_cfg_t sInitCfg = {
+        .unit_id = ADC_UNIT_1
     };
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&sUnitCfg, &gsAdcHandleUnit1));
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&sInitCfg, &gsAdcHandleUnit1));
 
-    // Configure default attenuations (auto-range will override)
-    adc_oneshot_chan_cfg_t sChanCfgA = { .atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_12 };
-    adc_oneshot_chan_cfg_t sChanCfgB = { .atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_12 };
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(gsAdcHandleUnit1, iChA_AdcChannel, &sChanCfgA));
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(gsAdcHandleUnit1, iChB_AdcChannel, &sChanCfgB));
+    // Default channel configuration; attenuation will be reconfigured dynamically
+    adc_oneshot_chan_cfg_t sChanCfg = {
+        .atten = ADC_ATTEN_DB_12,
+        .bitwidth = ADC_BITWIDTH_12
+    };
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(gsAdcHandleUnit1, iChA_AdcChannel, &sChanCfg));
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(gsAdcHandleUnit1, iChB_AdcChannel, &sChanCfg));
 
-    // Initialize cached result defaults
-    memset(&gsLatestResult, 0, sizeof(gsLatestResult));
-    gsLatestResult.iSamplesPerChannel = iSamples_PerCh;
-
+    ESP_LOGI(gTag, "ADC initialized (samples=%d)", iSamples_PerCh);
     return ESP_OK;
 }
 
 
+
 esp_err_t Adc_MeasureNow(void)
 {
-    // Performs one ADC capture window and computes RMS for both channels
-    // Auto-ranges attenuation per channel for best sensitivity without saturation
-    // Stores computed RMS values and timestamp into a cached result struct
+    // Captures one window, computes RMS, and caches last waveform in volts
+    // Uses filtering and DC removal so the cached waveform is centered at 0 V
+    // Stores results under mutex so API reads are consistent
 
     // Validate initialization state
     if (gsAdcHandleUnit1 == NULL || gsAdcMutex == NULL) {
@@ -333,36 +354,70 @@ esp_err_t Adc_MeasureNow(void)
         return ESP_FAIL;
     }
 
-    // Filter raw samples for stable RMS
+    // Filter raw samples for stable waveform and RMS
     static uint16_t auFiltChA[iSamples_PerCh];
     static uint16_t auFiltChB[iSamples_PerCh];
     Moving_Average_Filter(auRawChA, auFiltChA, iSamples_PerCh);
     Moving_Average_Filter(auRawChB, auFiltChB, iSamples_PerCh);
 
-    // Remove DC component per channel
-    static int32_t aiAcChA[iSamples_PerCh];
-    static int32_t aiAcChB[iSamples_PerCh];
-    Dc_Remove(auFiltChA, aiAcChA, iSamples_PerCh);
-    Dc_Remove(auFiltChB, aiAcChB, iSamples_PerCh);
+    // Remove DC component per channel to get AC counts around 0
+    static int32_t aiAcCountsChA[iSamples_PerCh];
+    static int32_t aiAcCountsChB[iSamples_PerCh];
+    Dc_Remove(auFiltChA, aiAcCountsChA, iSamples_PerCh);
+    Dc_Remove(auFiltChB, aiAcCountsChB, iSamples_PerCh);
 
-    // Compute RMS values in volts
-    float fRmsA = Compute_RmsVolts(aiAcChA, iSamples_PerCh, eChosenAttenA);
-    float fRmsB = Compute_RmsVolts(aiAcChB, iSamples_PerCh, eChosenAttenB);
+    // Compute RMS values in volts from DC-removed waveform
+    float fRmsA = Compute_RmsVolts(aiAcCountsChA, iSamples_PerCh, eChosenAttenA);
+    float fRmsB = Compute_RmsVolts(aiAcCountsChB, iSamples_PerCh, eChosenAttenB);
 
-    // Store latest results atomically using mutex
+    // Convert AC counts to signed millivolts for caching and plotting
+    static int16_t aiAcMilliVoltsChA[iSamples_PerCh];
+    static int16_t aiAcMilliVoltsChB[iSamples_PerCh];
+
+    for (int iIndex = 0; iIndex < iSamples_PerCh; iIndex++) {
+
+        float fVoltsA = Adc_CountsToVolts(eChosenAttenA, aiAcCountsChA[iIndex]);
+        float fVoltsB = Adc_CountsToVolts(eChosenAttenB, aiAcCountsChB[iIndex]);
+
+        int32_t iMilliVoltsA = (int32_t)lroundf(fVoltsA * 1000.0f);
+        int32_t iMilliVoltsB = (int32_t)lroundf(fVoltsB * 1000.0f);
+
+        if (iMilliVoltsA > INT16_MAX) iMilliVoltsA = INT16_MAX;
+        if (iMilliVoltsA < INT16_MIN) iMilliVoltsA = INT16_MIN;
+        if (iMilliVoltsB > INT16_MAX) iMilliVoltsB = INT16_MAX;
+        if (iMilliVoltsB < INT16_MIN) iMilliVoltsB = INT16_MIN;
+
+        aiAcMilliVoltsChA[iIndex] = (int16_t)iMilliVoltsA;
+        aiAcMilliVoltsChB[iIndex] = (int16_t)iMilliVoltsB;
+    }
+
+    // Store latest results and last waveform atomically
+    int64_t liNowTimestampUs = esp_timer_get_time();
+
     xSemaphoreTake(gsAdcMutex, portMAX_DELAY);
+
     gsLatestResult.fRmsVoltsChA = fRmsA;
     gsLatestResult.fRmsVoltsChB = fRmsB;
-    gsLatestResult.liTimestampUs = esp_timer_get_time();
+    gsLatestResult.liTimestampUs = liNowTimestampUs;
     gsLatestResult.eAttenChA = eChosenAttenA;
     gsLatestResult.eAttenChB = eChosenAttenB;
     gsLatestResult.iSamplesPerChannel = iSamples_PerCh;
     gbHasLatest = true;
+
+    memcpy(gaiLastAcMilliVoltsChA, aiAcMilliVoltsChA, sizeof(gaiLastAcMilliVoltsChA));
+    memcpy(gaiLastAcMilliVoltsChB, aiAcMilliVoltsChB, sizeof(gaiLastAcMilliVoltsChB));
+    giLastSamplesCount = iSamples_PerCh;
+    gliLastSamplesTimestampUs = liNowTimestampUs;
+    geLastSamplesAttenChA = eChosenAttenA;
+    geLastSamplesAttenChB = eChosenAttenB;
+    gbHasLastSamples = true;
+
     xSemaphoreGive(gsAdcMutex);
 
     ESP_LOGI(gTag, "RMS A=%.6f V, B=%.6f V (atten %d,%d)", fRmsA, fRmsB, (int)eChosenAttenA, (int)eChosenAttenB);
     return ESP_OK;
 }
+
 
 
 bool Adc_GetLatest(adc_result_t *psResultOut)
@@ -385,4 +440,59 @@ bool Adc_GetLatest(adc_result_t *psResultOut)
     xSemaphoreGive(gsAdcMutex);
 
     return bHasValue;
+}
+
+
+
+bool Adc_GetLastSamplesMilliVolts(int16_t *piChannelA_mV, int16_t *piChannelB_mV, int iMaxSamples,
+                                  int *piSamplesReturned, int64_t *pliTimestampUs,
+                                  adc_atten_t *peAttenChannelA, adc_atten_t *peAttenChannelB)
+{
+    // Copies the last cached AC waveform window as signed millivolts
+    // Keeps the waveform centered around 0 so both channels share a common zero axis
+    // Provides metadata to let the UI annotate captures consistently
+
+    // Validate module state
+    if (gsAdcMutex == NULL || iMaxSamples <= 0) {
+        return false;
+    }
+
+    // Copy cached samples under mutex
+    xSemaphoreTake(gsAdcMutex, portMAX_DELAY);
+
+    bool bHasValue = gbHasLastSamples;
+    int iCopyCount = giLastSamplesCount;
+    if (iCopyCount > iMaxSamples) {
+        iCopyCount = iMaxSamples;
+    }
+
+    // Copy waveform and metadata when available
+    if (bHasValue && iCopyCount > 0) {
+
+        // Copy waveform arrays when provided
+        if (piChannelA_mV != NULL) {
+            memcpy(piChannelA_mV, gaiLastAcMilliVoltsChA, (size_t)iCopyCount * sizeof(int16_t));
+        }
+        if (piChannelB_mV != NULL) {
+            memcpy(piChannelB_mV, gaiLastAcMilliVoltsChB, (size_t)iCopyCount * sizeof(int16_t));
+        }
+
+        // Copy metadata fields when provided
+        if (piSamplesReturned != NULL) {
+            *piSamplesReturned = iCopyCount;
+        }
+        if (pliTimestampUs != NULL) {
+            *pliTimestampUs = gliLastSamplesTimestampUs;
+        }
+        if (peAttenChannelA != NULL) {
+            *peAttenChannelA = geLastSamplesAttenChA;
+        }
+        if (peAttenChannelB != NULL) {
+            *peAttenChannelB = geLastSamplesAttenChB;
+        }
+    }
+
+    xSemaphoreGive(gsAdcMutex);
+
+    return (bHasValue && iCopyCount > 0);
 }
