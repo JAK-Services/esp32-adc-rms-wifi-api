@@ -18,6 +18,7 @@ static httpd_handle_t gsHttpServer = NULL;
 static esp_err_t WebSrv_SendRedirect(httpd_req_t *psReq, const char *psLocation);
 static esp_err_t WebSrv_HandleCaptive(httpd_req_t *psReq);
 
+
 static esp_err_t WebSrv_HandleRoot(httpd_req_t *psReq)
 {
     // Redirects browsers to the provisioning page during first-boot AP setup
@@ -26,6 +27,7 @@ static esp_err_t WebSrv_HandleRoot(httpd_req_t *psReq)
 
     return WebSrv_SendRedirect(psReq, "/provision");
 }
+
 
 static esp_err_t WebSrv_SendRedirect(httpd_req_t *psReq, const char *psLocation)
 {
@@ -43,6 +45,7 @@ static esp_err_t WebSrv_SendRedirect(httpd_req_t *psReq, const char *psLocation)
     return httpd_resp_send(psReq, NULL, 0);
 }
 
+
 static esp_err_t WebSrv_HandleCaptive(httpd_req_t *psReq)
 {
     // Handles OS captive portal probe URLs and redirects them to provisioning
@@ -51,6 +54,7 @@ static esp_err_t WebSrv_HandleCaptive(httpd_req_t *psReq)
 
     return WebSrv_SendRedirect(psReq, "/provision");
 }
+
 
 esp_err_t WebSrv_Start(void)
 {
@@ -115,6 +119,7 @@ esp_err_t WebSrv_Start(void)
 
     return ESP_OK;
 }
+
 
 httpd_handle_t WebSrv_GetHandle(void)
 {
