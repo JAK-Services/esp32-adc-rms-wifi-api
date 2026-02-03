@@ -17,6 +17,7 @@
 
 static const char *gTag = "WIFI_PROV";
 
+
 static void WifiProv_UrlDecode(const char *sSrc, char *sDst, size_t iDstSize)
 {
     // Decodes application/x-www-form-urlencoded fields
@@ -59,6 +60,7 @@ static void WifiProv_UrlDecode(const char *sSrc, char *sDst, size_t iDstSize)
     sDst[iDstIndex] = '\0';
 }
 
+
 static void WifiProv_ExtractFormField(const char *sBody, const char *sKey,
                                       char *sOutVal, size_t iOutSize)
 {
@@ -98,6 +100,7 @@ static void WifiProv_ExtractFormField(const char *sBody, const char *sKey,
 
     WifiProv_UrlDecode(sTemp, sOutVal, iOutSize);
 }
+
 
 static esp_err_t WifiProv_HandleGet(httpd_req_t *psReq)
 {
@@ -154,6 +157,7 @@ static esp_err_t WifiProv_HandleGet(httpd_req_t *psReq)
     return httpd_resp_send(psReq, sHtml, HTTPD_RESP_USE_STRLEN);
 }
 
+
 static esp_err_t WifiProv_HandlePost(httpd_req_t *psReq)
 {
     // Saves posted Wi-Fi credentials to non-volatile storage.
@@ -202,6 +206,7 @@ static esp_err_t WifiProv_HandlePost(httpd_req_t *psReq)
     httpd_resp_send(psReq, "", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
+
 
 esp_err_t WifiProv_RegisterHandlers(httpd_handle_t sHttpServer)
 {
