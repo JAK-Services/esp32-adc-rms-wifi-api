@@ -4,6 +4,9 @@ This project implements a **dual-channel RMS measurement system** on an ESP32,
 combined with **Wi-Fi provisioning**, a **local HTTP API**, and a **captive
 portal–assisted setup flow**.
 
+Development environment
+VS Code 1.108.1 • ESP-IDF 1.11.1
+
 It is designed for **local network use**, educational purposes, and integration
 into home or lab environments where ADC measurements need to be accessed over
 Wi-Fi.
