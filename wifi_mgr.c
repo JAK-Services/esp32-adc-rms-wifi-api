@@ -61,6 +61,7 @@ static esp_err_t WifiMgr_InitWifiStack(void);
 static esp_err_t WifiMgr_StartWifiApSta(void);
 static esp_err_t WifiMgr_ConfigureStaIfValid(const wifi_creds_t *psCreds);
 
+
 static void WifiMgr_SetState(wifi_mgr_state_t eNewState)
 {
     // Updates internal state used for diagnostics and UI
@@ -71,6 +72,7 @@ static void WifiMgr_SetState(wifi_mgr_state_t eNewState)
     geWifiState = eNewState;
 }
 
+
 wifi_mgr_state_t WifiMgr_GetState(void)
 {
     // Returns the current Wi-Fi manager state for API/UI reporting
@@ -79,6 +81,7 @@ wifi_mgr_state_t WifiMgr_GetState(void)
 
     return geWifiState;
 }
+
 
 bool WifiMgr_IsConnected(void)
 {
@@ -95,6 +98,7 @@ bool WifiMgr_IsConnected(void)
 
     return ((uiBits & WIFI_CONNECTED_BIT) != 0);
 }
+
 
 bool WifiMgr_GetStaIp(char *psOutIp, size_t stOutLen)
 {
@@ -116,6 +120,7 @@ bool WifiMgr_GetStaIp(char *psOutIp, size_t stOutLen)
     (void)snprintf(psOutIp, stOutLen, "%s", gsStaIpStr);
     return true;
 }
+
 
 static void WifiMgr_BuildApSsid(char *psSsid, size_t stSsidLen)
 {
