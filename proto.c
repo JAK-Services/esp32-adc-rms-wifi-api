@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <inttypes.h>
 
+
 int Proto_BuildStatusJson(char *psBuffer, size_t szBuffer, wifi_mgr_state_t eState)
 {
     // Builds JSON payload for device status endpoint
@@ -21,6 +22,7 @@ int Proto_BuildStatusJson(char *psBuffer, size_t szBuffer, wifi_mgr_state_t eSta
                             (int)eState);
     return iWritten;
 }
+
 
 int Proto_BuildRmsJson(char *psBuffer, size_t szBuffer, const adc_result_t *psResult, bool bHasResult)
 {
