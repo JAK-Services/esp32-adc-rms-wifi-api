@@ -15,6 +15,7 @@ static const char *gsNamespace = "cfg";
 static const char *gsKeySsid = "wifi_ssid";
 static const char *gsKeyPass = "wifi_pass";
 
+
 esp_err_t Storage_Init(void)
 {
     // Initializes NVS flash storage for configuration persistence
@@ -31,6 +32,7 @@ esp_err_t Storage_Init(void)
 
     return eErr;
 }
+
 
 esp_err_t Storage_LoadWifiCreds(wifi_creds_t *psCredsOut)
 {
@@ -75,6 +77,7 @@ esp_err_t Storage_LoadWifiCreds(wifi_creds_t *psCredsOut)
     return ESP_OK;
 }
 
+
 esp_err_t Storage_SaveWifiCreds(const wifi_creds_t *psCreds)
 {
     // Saves Wi-Fi SSID and password into NVS
@@ -107,6 +110,7 @@ esp_err_t Storage_SaveWifiCreds(const wifi_creds_t *psCreds)
     nvs_close(sHandle);
     return eErr;
 }
+
 
 esp_err_t Storage_ClearWifiCreds(void)
 {
